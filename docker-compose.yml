@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  microbe:
+    build: .
+    container_name: microbe
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - .:/app
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M

@@ -1,0 +1,6 @@
+/.backup/*
+/vendor
+/logs
+.idea
+.zed
+.env
