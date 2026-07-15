@@ -6,68 +6,159 @@
 
 ## 💻 Среда исполнения и запуск
 
-- **Версия PHP**: 8.3 ( alpine CLI)
-- **Локальный веб-сервер**: Встроенный PHP сервер внутри контейнера Docker на порту `9000`.
-- **Лимиты Docker**: 256MB RAM, 50% CPU на контейнер. Пишите память-эффективный код.
-- **Переменные окружения**: Загружаются на самом раннем этапе в `bootstrap/machine.php` с помощью `Symfony\Component\Dotenv\Dotenv` с включенным методом `usePutenv(true)`. Используйте `getenv('KEY') ?: 'default'` в файлах конфигурации DI-контейнера.
-- **Резервное копирование**: Для временного локального хранения конфиденциальных, чувствительных данных, логов или устаревших копий файлов используется директория `.backup/`. Содержимое директории добавлено в `.gitignore`.
+| Параметр | Значение |
+| :--- | :--- |
+| **PHP** | 8.3 (alpine CLI) |
+| **Порт** | `9000` (встроенный PHP-сервер внутри Docker) |
+| **Docker** | 256 MB RAM, 50% CPU на контейнер |
+| **Dotenv** | `bootstrap/machine.php` → `Symfony\Dotenv` с `usePutenv(true)`. В конфигурационных файлах используйте `getenv('KEY') ?: 'default'` |
+| **Резерв** | Директория `.backup/` — для локальных копий и чувствительных данных; содержимое исключено из Git |
 
 ---
 
-## 📐 Архитектура и слабая связанность
+## 📐 Принцип трёх слоёв (строго соблюдать)
 
-### 1. Принцип независимости ядра фреймворка
-Весь код в директории `src/Framework/` является **неприкосновенным ядром (kernel)**.
-* Запрещено изменять код ядра под нужды конкретных прикладных фич проекта.
-* Компоненты ядра никогда не должны зависеть от классов из директорий `src/Magistrale/` или `src/App/`.
+```
+src/Framework/   ← ⚙️ Ядро Microbe       — НЕ ИЗМЕНЯТЬ без крайней необходимости
+src/Magistrale/  ← 🧱 Расширения проекта — интеграции, провайдеры, логгеры
+src/App/         ← 🎯 Слой приложения    — контроллеры, стратегии, Middleware, Tools
+```
 
-### 2. Magistrale (Расширения)
-Директория `src/Magistrale/` используется для любых специфичных для проекта интеграций (подключения к БД, кеширование, менеджеры сессий, фабрики). Пример реализации: `Magistrale\Factories\StaticFactory` динамически регистрирует и возвращает статические (неизменяемые, но расширяемые на уровне проекта) данные страниц из папки `statics/`.
+### 1. `src/Framework/` — Неприкосновенное ядро
+- Запрещено изменять под нужды конкретных прикладных фич.
+- Компоненты ядра **никогда** не зависят от `src/Magistrale/` или `src/App/`.
+- Ядро знает только о PSR-интерфейсах.
 
-### 3. Интеграционный мост (App\Templates\Plates)
-Чтобы связать системные обработчики ядра (например, обработчик ошибок) с проектной статической фабрикой `StaticFactory` без загрязнения ядра:
-* Класс `App\Templates\Plates` наследует системный `Framework\Templates\Plates` на уровне приложения (`src/App/`).
-* Он переопределяет метод `render()` для автоматического извлечения статических параметров страницы, их склеивания с параметрами контроллера и рендеринга общего макета `template/common.php`.
-* Он зарегистрирован под DI-алиасом `'template'` в `config/definitions.php`, прозрачно подменяя базовую реализацию ядра.
+### 2. `src/Magistrale/` — Расширения проекта
+- Здесь размещаются специфичные для проекта интеграции: провайдеры сервисов, логгеры, менеджеры сессий.
+- `McpServiceProvider` динамически регистрирует MCP-инструменты из DI-ключа `mcp.tools`.
 
----
-
-## ⚙️ Жизненные циклы запросов
-
-### Веб-запрос (Web Flow)
-`public/index.php` -> `Application::make()` -> `EmitterInterface::emit(RouterInterface)` -> `LeagueRouter::dispatch()` -> `ApplicationStrategy` -> `Controller::__invoke()`.
-
-### Консольный запрос (CLI Flow)
-`bin/console.php` -> `Application::make()->cli()` -> `ConsoleInterface::run()`.
+### 3. `src/App/` — Слой приложения
+- Контроллеры, Middleware, стратегии роутера, классы инструментов.
+- Единственное место, где допустима бизнес-логика приложения.
 
 ---
 
-## 🛠️ CLI Жизненный цикл и CommandInterface
+## 🌐 Жизненный цикл HTTP-запроса (MCP Flow)
 
-Все консольные команды должны реализовывать `Framework\Contracts\Console\CommandInterface` и наследовать `Symfony\Component\Console\Command\Command`.
+```
+public/index.php
+  → Application::run()
+  → LeagueRouter::dispatch()
+  → McpJsonStrategy (стратегия роутера)
+  → [CredentialsMiddleware → ProfilerMiddleware]
+  → McpController::__invoke()
+  → Mcp\Server::run(StreamableHttpTransport)
+  → JSON-RPC обработка (initialize / tools/list / tools/call)
+  → ResponseInterface
+  → McpJsonStrategy::decorateResponse() [+ CORS]
+  → SapiEmitter::emit()
+```
 
-* **Запрещено внедрять зависимости в `__construct()`**: Symfony Console создает экземпляры всех зарегистрированных команд на старте CLI для построения списка. Тяжелые внедрения в конструкторе замедлят каждый вызов консоли (даже простые `--help` или `list`).
-* **Порядок инициализации**:
-  1. `SymfonyConsole::add()` обнаруживает `CommandInterface` и вызывает `setContainer($container)`, внедряя DI-контейнер в объект команды.
-  2. `SymfonyConsole::find()` вызывается непосредственно перед запуском команды пользователем и вызывает `construct()` у найденной команды.
-  3. Все тяжелые сервисы должны разрешаться лениво именно внутри метода `construct()`.
+**При ошибке роутинга (404/405/500):**
+```
+McpJsonStrategy::buildJsonResponseMiddleware() / getThrowableHandler()
+  → CorsDecoratorMiddleware::process()   ← оборачивает ответ и инжектирует CORS
+  → JSON { "status_code": 4xx, "reason_phrase": "..." }
+```
 
 ---
 
-## 🧪 Тестирование
+## 🧩 Добавление нового MCP-инструмента
 
-* Среда тестов конфигурируется через `phpunit.xml`.
-* Интеграционные тесты в `tests/ApplicationTest.php` проверяют сборку DI-контейнера. Поскольку `ReflectionContainer` регистрируется прямо в конструкторе `Application`, контейнер всегда готов к автосвязыванию.
-* Запуск тестов выполняется через: `docker exec microbe vendor/bin/phpunit`.
+Процесс строго декларативный — **код провайдеров не трогать**.
+
+### Шаг 1. Класс в `src/App/Tools/`
+
+```php
+<?php namespace App\Tools;
+
+use Mcp\Annotation\Tool\Param;
+
+class MyTool
+{
+    public static function myAction(
+        #[Param('Описание параметра')] string $input
+    ): string {
+        return "Результат: {$input}";
+    }
+}
+```
+
+### Шаг 2. Запись в `config/definitions.php` под ключ `mcp.tools`
+
+```php
+new Definition('mcp.tools', [
+    [
+        'handler'     => [MyTool::class, 'myAction'],
+        'name'        => 'my-tool',
+        'description' => 'Описание вашего инструмента.'
+    ]
+])
+```
+
+`McpServiceProvider` читает этот ключ при старте и вызывает `Builder::addTool()` в цикле — без какого-либо изменения кода провайдеров.
+
+---
+
+## ⚙️ Жизненный цикл CLI
+
+```
+bin/console.php → Application::make()->cli() → ConsoleInterface::run()
+```
+
+**Правила для команд** (реализуют `Framework\Contracts\Console\CommandInterface`):
+- **Запрещено** внедрять тяжелые зависимости в `__construct()`: Symfony Console инстанцирует все команды при старте.
+- Тяжелые сервисы разрешаются **лениво** в методе `construct()`, который вызывается непосредственно перед выполнением команды.
+
+```
+SymfonyConsole::add()  → setContainer($container)   ← DI-контейнер внедрен
+SymfonyConsole::find() → command->construct()        ← зависимости разрешены
+command->execute()                                   ← бизнес-логика
+```
+
+---
+
+## 🔑 CORS и стратегия роутера
+
+`App\Strategies\McpJsonStrategy` — единственное место управления CORS в проекте:
+
+| Метод | Назначение |
+| :--- | :--- |
+| `addResponseDecorator()` в конструкторе | CORS для успешных ответов контроллера |
+| `buildJsonResponseMiddleware()` | CORS для ошибок `404`/`405` через `CorsDecoratorMiddleware` |
+| `getThrowableHandler()` | CORS для непойманных исключений `500` через `CorsDecoratorMiddleware` |
+| `injectCors()` (static) | Единая точка добавления заголовков — вызывается из всех трёх путей |
+
+**Запрещено** добавлять CORS-заголовки вручную в контроллерах или Middleware — это нарушает Single Responsibility.
 
 ---
 
 ## ⚡ Особенности League/Container v4
 
 1. **Явные дефиниции vs Автосвязывание**:
-   * Классы, зарегистрированные явно через метод `$container->add()`, игнорируют автосвязывание `ReflectionContainer`. Все их аргументы должны быть описаны через методы `.addArgument()`.
-   * Алиасы и явные дефиниции описываются в файле `config/definitions.php`.
+   - Классы, зарегистрированные через `$container->add()`, **игнорируют** `ReflectionContainer`. Все аргументы конструктора должны быть переданы вручную через `.addArgument()` или через фабричное замыкание.
+   - `McpJsonStrategy` инстанцирует `ResponseFactory` прямо в своём конструкторе (без параметров) — это намеренное решение для обхода ограничения League Container при явной регистрации.
+
 2. **Инфлекторы (Inflectors)**:
-   * Метод `InflectorAggregate::inflect()` вызывается контейнером для всех разрешенных значений (включая конфигурационные массивы). Поэтому аргумент `$object` не типизирован и защищен проверкой `if (!is_object($object)) return $object;`.
+   - `InflectorAggregate::inflect()` вызывается для **всех** разрешённых значений, включая массивы. Аргумент `$object` не типизирован; защита: `if (!is_object($object)) return $object;`.
+
 3. **Сервис-провайдеры**:
-   * Реализуют интерфейс `BootableServiceProviderInterface`. Провайдеры регистрируются в `config/providers.php`.  Цикл разрешения провайдеров в `ProviderAggregate::register()` должен пропускать неподходящие провайдеры через `continue`, не прерывая обход остальных провайдеров.
+   - Реализуют `BootableServiceProviderInterface`. Регистрируются в `config/providers.php`.
+   - `ProviderAggregate::register()` обходит все провайдеры через `continue`, не прерывая цикл при несовпадении.
+
+---
+
+## 🧪 Тестирование
+
+```bash
+# Запуск всех тестов
+docker exec microbe vendor/bin/phpunit
+
+# Очистка кеша PHPUnit
+rm -rf .phpunit.cache
+```
+
+- Конфигурация: `phpunit.xml`
+- Интеграционные тесты: `tests/ApplicationTest.php` — проверяют корректную сборку DI-контейнера.
+- `.phpunit.cache/` добавлен в `.gitignore`.
