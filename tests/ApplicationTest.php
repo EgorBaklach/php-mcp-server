@@ -2,11 +2,14 @@
 
 use PHPUnit\Framework\TestCase;
 use Framework\Application;
-use Framework\Contracts\Template\TemplateInterface;
 use Framework\Contracts\Router\RouterInterface;
 use Framework\Contracts\Emitter\EmitterInterface;
-use Framework\Handlers\ErrorHandlerInterface;
-use Magistrale\Factories\StaticFactory;
+use League\Route\Strategy\StrategyInterface;
+use Psr\Http\Message\ResponseFactoryInterface;
+use Psr\Http\Message\StreamFactoryInterface;
+use Psr\Log\LoggerInterface;
+use PHPUnit\Framework\Attributes\TestDox;
+use Mcp\Server;
 
 class ApplicationTest extends TestCase
 {
@@ -14,44 +17,41 @@ class ApplicationTest extends TestCase
 
     protected function setUp(): void
     {
-        // Загружаем реальную конфигурацию сборки машины фреймворка
         $this->config = require __DIR__ . '/../bootstrap/machine.php';
     }
 
+    #[TestDox('Проверяет успешный запуск и инициализацию контейнера приложения')]
     public function testApplicationContainerBootstrap(): void
     {
         $app = Application::make($this->config);
         $this->assertInstanceOf(Application::class, $app);
     }
 
+    #[TestDox('Проверяет наличие и корректное разрешение всех необходимых MCP-сервисов в контейнере')]
     public function testRequiredServicesAreAvailableInContainer(): void
     {
-        // Создаем инстанс приложения
         $app = Application::make($this->config);
         
-        // Получаем DI-контейнер через рефлексию (так как свойство protected/private)
         $reflector = new \ReflectionClass($app);
         $containerProperty = $reflector->getProperty('container');
         $containerProperty->setAccessible(true);
         $container = $containerProperty->getValue($app);
 
-        // Проверяем наличие ключевых интерфейсов в контейнере
-        $this->assertTrue($container->has(TemplateInterface::class));
+        // Verify key MCP-related services exist
         $this->assertTrue($container->has(RouterInterface::class));
         $this->assertTrue($container->has(EmitterInterface::class));
-        $this->assertTrue($container->has(ErrorHandlerInterface::class));
+        $this->assertTrue($container->has(ResponseFactoryInterface::class));
+        $this->assertTrue($container->has(StrategyInterface::class));
+        $this->assertTrue($container->has(LoggerInterface::class));
+        $this->assertTrue($container->has(StreamFactoryInterface::class));
+        $this->assertTrue($container->has(Server::class));
 
-        // Проверяем успешное разрешение (resolve) каждого сервиса
-        $this->assertInstanceOf(TemplateInterface::class, $container->get(TemplateInterface::class));
+        // Ensure resolution works correctly
         $this->assertInstanceOf(RouterInterface::class, $container->get(RouterInterface::class));
-        $this->assertInstanceOf(StaticFactory::class, $container->get(StaticFactory::class));
-
-        // Проверяем успешное создание каждой зарегистрированной команды
-        $commands = $container->get('commands');
-        $this->assertIsArray($commands);
-        foreach ($commands as $commandClass) {
-            $command = $container->get($commandClass);
-            $this->assertInstanceOf(\Symfony\Component\Console\Command\Command::class, $command);
-        }
+        $this->assertInstanceOf(ResponseFactoryInterface::class, $container->get(ResponseFactoryInterface::class));
+        $this->assertInstanceOf(StrategyInterface::class, $container->get(StrategyInterface::class));
+        $this->assertInstanceOf(LoggerInterface::class, $container->get(LoggerInterface::class));
+        $this->assertInstanceOf(StreamFactoryInterface::class, $container->get(StreamFactoryInterface::class));
+        $this->assertInstanceOf(Server::class, $container->get(Server::class));
     }
 }
