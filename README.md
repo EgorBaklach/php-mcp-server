@@ -68,7 +68,11 @@
 │       └── Providers/
 │           └── McpServiceProvider.php  # Провайдер MCP-сервера и StreamFactory
 ├── tests/
-│   └── ApplicationTest.php             # Интеграционные тесты сборки DI-контейнера
+│   ├── ApplicationTest.php             # Интеграционные тесты сборки DI-контейнера
+│   ├── CalculateToolTest.php           # Тесты для инструмента вычислений
+│   ├── McpControllerTest.php           # Тесты для контроллера MCP
+│   ├── McpJsonStrategyTest.php         # Тесты CORS-стратегии
+│   └── PingToolTest.php                # Тесты для пинг-инструмента
 ├── .backup/                            # Локальное резервное хранилище (в .gitignore)
 ├── .env.example                        # Шаблон переменных окружения
 ├── docker-compose.yml                  # Docker Compose конфигурация
@@ -104,7 +108,7 @@ docker exec microbe php bin/console.php hello:world
 
 ### 5. Запуск тестов
 ```bash
-docker exec microbe vendor/bin/phpunit
+docker exec microbe vendor/bin/phpunit --testdox
 ```
 
 ---

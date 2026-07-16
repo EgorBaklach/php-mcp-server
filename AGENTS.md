@@ -152,13 +152,16 @@ command->execute()                                   ← бизнес-логик
 ## 🧪 Тестирование
 
 ```bash
-# Запуск всех тестов
-docker exec microbe vendor/bin/phpunit
+# Запуск всех тестов с человекочитаемым выводом (TestDox)
+docker exec microbe vendor/bin/phpunit --testdox
 
 # Очистка кеша PHPUnit
 rm -rf .phpunit.cache
 ```
 
 - Конфигурация: `phpunit.xml`
-- Интеграционные тесты: `tests/ApplicationTest.php` — проверяют корректную сборку DI-контейнера.
+- Структура тестов в директории `tests/`:
+  - `PingToolTest.php` / `CalculateToolTest.php` — модульные тесты для зарегистрированных MCP-инструментов.
+  - `McpControllerTest.php` / `McpJsonStrategyTest.php` — тесты HTTP-слоя (контроллер, CORS-заголовки).
+  - `ApplicationTest.php` — проверяет сборку DI-контейнера и доступность служб.
 - `.phpunit.cache/` добавлен в `.gitignore`.
